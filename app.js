@@ -16,7 +16,7 @@ const LANGS='Русский, English, Español, Беларуская (тараш
 const ROUNDS=[
  {title:'Мемы со смыслом',type:'team',questions:Array(4).fill(null)},
  {title:'Сохранёнки',type:'team',questions:Array(5).fill(null)},
- {title:'Аудиозаписи скрыты',type:'team',questions:Array(4).fill(null)},
+ {title:'Аудиозаписи',type:'team',questions:Array(4).fill(null)},
  {title:'Узнай её из тысячи',type:'team',questions:Array(4).fill(null)},
  {title:'Экзамен на близость',type:'individual',questions:Array(5).fill(null)}
 ];
