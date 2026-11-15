@@ -1,6 +1,6 @@
-/* Ира Перцовская • ВК 2017 • демонстрационная автономная версия.
-   ВАЖНО: правильные ответы в этом файле доступны через инструменты разработчика.
-   Для настоящего соревновательного режима требуется серверная проверка и Supabase. */
+/* Ира Перцовская • ВК 2017.
+   Вопросы загружаются из закрытого каталога Supabase через серверный snapshot RPC.
+   В клиентском коде оставлены только названия и количество вопросов в раундах. */
 'use strict';
 const A='assets/';
 const NAMES=['Алина','Ангелина','Вова','Саша кэ','Игнат','Аня','Яна','Гриша','Ксюша','Софа','Саня'];
@@ -14,44 +14,13 @@ const globalTrackName=document.getElementById('global-track-name');
 let currentTrack=-1;
 const LANGS='Русский, English, Español, Беларуская (тарашкевіца), Українська, Suomi, Deutsch, Italiano, Български, Hrvatski, Magyar, Српски, Português, Ελληνικά, Polski, Français, 한국어, 汉语, Lietuvių, 日本語, Čeština, Eesti, Македонски, Татарча, Башҡортса, Чӑвашла, Slovenčina, Română, Norsk, Latviešu, Azərbaycanca';
 const ROUNDS=[
- {title:'Мемы со смыслом',type:'team',questions:[
-  {title:'Кто поставил лайк?',prompt:'Какой из этих мемов Ира действительно лайкнула?',type:'media-select',options:['Пепе и стиральная машина','cumka','моя жопа джуси…','приключение какашки'],images:['quiz_liked.webp','quiz_meme_b.webp','quiz_meme_c.webp','quiz_meme_d.webp'],correct:0,max:1,explain:'Настоящий лайк — мем с Пепе и стиральной машиной.'},
-  {title:'Подписки, за которые стыдно',prompt:'На какое из этих сообществ действительно подписана Ира?',options:['Леонардо Дайвинчик','Мам, сейчас так модно','OG Buda','Находки с Wildberries'],correct:3,max:1,explain:'Подписка на «Находки с Wildberries» подтверждена скриншотом.'},
-  {title:'Бинго имени неё',prompt:'Выберите пять фактов, которые действительно относятся к Ире.',type:'multi',max:5,options:['Ира завела второй аккаунт, чтобы спорить с людьми в комментариях от чужого имени.','Если бы не Чернобыльская катастрофа, Иры бы не было.','Ира купила билет на концерт исполнителя, которого знала только по одной песне.','Ира попросила поехать руководителя домой с ним.','Ира выкладывала видео на YouTube с танцами собственной хореографии.','Ира всерьёз рассматривала работу в полиции.','Мама Иры не хотела, чтобы она родилась Скорпионом.','Ира однажды притворилась иностранкой, чтобы не разговаривать с незнакомым человеком.','Ира хотела платить мне проценты, чтобы я её обсирала.'],correct:[1,3,4,6,8],explain:'Пять настоящих фактов отмечены при раскрытии. За выбранный ложный снимается балл.'},
-  {title:'Рекомендовано лично',prompt:'Какой сериал Ира действительно рекомендовала посмотреть?',options:['Внешние отмели','Элита','Дневники вампира','Эйфория'],correct:0,max:1,explain:'Ира рекомендовала «Внешние отмели».'}
- ]},
- {title:'Сохранёнки',type:'team',questions:[
-  {title:'Фотошоп не поможет',prompt:'Какая подпись была под фотографией Иры?',image:'quiz_instagram.webp',options:['дальше еж ➡️','там еж ➡️','смотрите еж ➡️','кстати еж ➡️'],correct:0,max:1},
-  {title:'Доказательства из галереи',prompt:'Что, помимо надписи «Жидкое мыло», можно увидеть на оригинальной фотографии?',image:'quiz_soap.webp',imageMode:'masked',options:['Отражение Иры в зеркале','Отражение Иры в металлическом диспенсере','Отражение Иры в хромированной сушилке для рук','Отражение Иры в металлическом держателе туалетной бумаги'],correct:0,max:1,explain:'На исходнике — отражение Иры в зеркале.'},
-  {title:'Заблокировано Роскомнадзором',prompt:'Что было на фотографии до вмешательства Роскомнадзора?',image:'quiz_balloon.webp',imageMode:'balloon',options:['Огромный розовый воздушный шар','Воздушный шар в форме сердца','Надувная корона','Воздушный шар в форме цифры'],correct:0,max:1,explain:'Над головой был большой розовый воздушный шар.'},
-  {title:'Эволюция покемона',prompt:'Расставьте фотографии от самой ранней к самой поздней.',type:'order',images:['quiz_year1.webp','quiz_year2.webp','quiz_year3.webp','quiz_year4.webp'],labels:['Фото 1','Фото 2','Фото 3','Фото 4'],correct:[2,1,0,3],max:3,strict:true,explain:'2019 → 2021 → 2022 → 2023.'},
-  {title:'Пост, который мы потеряли',prompt:'Какое слово пропущено в оригинальной подписи «вилка _____ ложка»?',image:'quiz_ears.webp',options:['роза','нож','ваза','коза'],correct:0,max:1,explain:'Оригинальная подпись: «вилка роза ложка».'}
- ]},
- {title:'Аудиозаписи скрыты',type:'team',questions:[
-  {title:'Всё ещё слушает',prompt:'Какой из этих треков Ира действительно слушает до сих пор?',options:['Markul, OBLADAET — Последний билет','T-Fest — Улети','PHARAOH, Boulevard Depo — 5 минут назад','PHARAOH — Дико, например'],correct:0,max:1},
-  {title:'Плейлист для психотерапевта',prompt:'Расставьте песни в личном рейтинге Иры — от 1-го места к 4-му.',type:'order',labels:['Лепестками роз','Карате чоп','Она хочет поехать в минск','Куртка 104'],correct:[0,1,2,3],max:4,strict:false},
-  {title:'Продолжи за неё',prompt:'ЛСП — «Конец света». После слов «Холодный голос проговорил…» что звучит дальше?',options:['Мы из комитета','Мы из интернета','Мы из кабинета','Мы из туалета'],correct:0,max:1,explain:'При раскрытии включаем оригинальное продолжение трека (аудио ещё не прикреплено).'},
-  {title:'Запрещённая аудиозапись',prompt:'С кем у Иры связана песня «Кайф ты поймала»?',options:['Рисана','Вероника','Эрик','Олеся Розлач'],correct:0,max:1,explain:'На строчке про панамеру Рисана и Ира однажды резко переглянулись — и теперь делают это каждый раз.'}
- ]},
- {title:'Узнай её из тысячи',type:'team',questions:[
-  {title:'Последний поиск',prompt:'Что Ира однажды искала в Google?',options:['вкусно и точка работа','вкусно и точка зарплата','вкусно и точка вакансии','вкусно и точка стажировка'],correct:0,max:1,explain:'Оригинальный поисковый запрос — «вкусно и точка работа».',revealImage:'quiz_google.webp'},
-  {title:'Удалено автором',prompt:'«не шути только про _____ с ним пж». Что скрыто?',options:['секс','его маму','его ориентацию','его национальность'],correct:0,max:1,revealImage:'quiz_said.webp'},
-  {title:'Переводчик с её языка',prompt:'Ира написала «осень». Что она на самом деле пыталась написать?',options:['Саня','Сорян','Скоро','Снова'],correct:0,max:1,explain:'В оригинале два сообщения: «сено» и «осень». Ира пыталась написать «Саня».',revealImage:'quiz_chat.webp'},
-  {title:'Смайл, который видел всё',prompt:'Какой эмодзи Ира использует чаще всего?',options:['🤨','🙄','😐','😒'],correct:0,max:1}
- ]},
- {title:'Экзамен на близость',type:'individual',questions:[
-  {title:'Режим инкогнито',prompt:'Как называется устройство Иры, которое можно обнаружить через Bluetooth или AirDrop?',options:['луна','киса','облако','звезда'],correct:0,max:1},
-  {title:'Два аккаунта спустя',prompt:'Как Ира раньше называла себя в интернете?',options:['Иро','Ирочка','Ирэн','Ирка Перчик'],correct:0,max:1},
-  {title:'В друзьях с 2017',prompt:'Расставьте архивные фотографии от самой ранней к самой поздней.',type:'order',images:['quiz_friend1.webp','quiz_friend2.webp','quiz_friend3.webp','quiz_friend4.webp'],labels:['Фото 1','Фото 2','Фото 3','Фото 4'],correct:[3,2,1,0],max:3,strict:true,explain:'2018 → 2019 → 2020 → 2022.'},
-  {title:'Топ за свои деньги',prompt:'Расставьте страны, в которых Ира хочет побывать, от самой желанной к пятой.',type:'order',labels:['🇮🇹 Италия','🇦🇷 Аргентина','🇮🇸 Исландия','🇯🇵 Япония','🇦🇺 Австралия'],correct:[0,1,2,3,4],max:5,strict:false},
-  {title:'Список желаний',prompt:'О чём Ира раньше мечтала, но сейчас передумала?',options:['Завести собаку','Переехать к морю','Отрастить очень длинные волосы','Пойти работать стюардессой'],correct:0,max:1}
- ]}
+ {title:'Мемы со смыслом',type:'team',questions:Array(4).fill(null)},
+ {title:'Сохранёнки',type:'team',questions:Array(5).fill(null)},
+ {title:'Аудиозаписи скрыты',type:'team',questions:Array(4).fill(null)},
+ {title:'Узнай её из тысячи',type:'team',questions:Array(4).fill(null)},
+ {title:'Экзамен на близость',type:'individual',questions:Array(5).fill(null)}
 ];
-const RESERVES=[
- {title:'Великие цитаты',prompt:'«Все еще думаю о том, как здорово ты выглядишь в этих _____». Какое слово пропущено?',options:['джинсах','штанах','трусах','колготках'],correct:0,max:1,revealImage:'quiz_quote.webp'},
- {title:'Контрольная закупка',prompt:'Что Ира однажды хотела себе купить?',options:['Кроссовки с колёсиками','Кроссовки со светящейся подошвой','Кроссовки с подсветкой, реагирующей на музыку','Кроссовки, меняющие цвет от температуры'],correct:0,max:1},
- {title:'У неё 99+',prompt:'Сколько непрочитанных сообщений у Иры в Telegram?',type:'number',max:3,correct:null,explain:'Фактическое число фиксируется организатором перед игрой.'}
-];
+const RESERVES=[]; // резервные задания хранятся только в Supabase и не публикуются заранее
 let page='profile',friendDetail=-1,photoList=[],photoIndex=0,tab='saved', draft=null, userId=localStorage.getItem('ira_self')||'', admin=false;
 const ORGANIZER_UID='fba39d1d-4616-4a7d-8642-8306f51bc197';
 const supabaseClient = window.supabase?.createClient(window.SUPABASE_URL, window.SUPABASE_PUBLISHABLE_KEY);
@@ -141,4 +110,4 @@ async function assignParticipant(participantId,teamId){if(!admin)return;const {e
 document.addEventListener('click',e=>{const n=e.target.closest('[data-team-action]');if(n){teamAction(n.dataset.teamAction,n.dataset.teamId,n.dataset.participantId);return}});
 document.addEventListener('change',e=>{const n=e.target.closest('[data-assign-participant]');if(n)assignParticipant(n.dataset.assignParticipant,n.value)});
 async function initSupabase(){if(!supabaseClient){notify('Не удалось загрузить Supabase. Проверь подключение к интернету.');return}const {data}=await supabaseClient.auth.getSession();admin=!!data.session&&data.session.user?.id===ORGANIZER_UID;if(data.session&&!admin)await supabaseClient.auth.signOut();await loadRemoteRoster();rosterChannel=supabaseClient.channel('ira-roster-live').on('postgres_changes',{event:'*',schema:'public',table:'teams'},loadRemoteRoster).on('postgres_changes',{event:'*',schema:'public',table:'participants'},loadRemoteRoster).subscribe();supabaseClient.auth.onAuthStateChange((_event,session)=>{admin=!!session&&session.user?.id===ORGANIZER_UID;if(session&&!admin)supabaseClient.auth.signOut();render()});render()}
-render();initSupabase();
+// Initialisation is handled by game-remote.js after the public question catalog is loaded.
