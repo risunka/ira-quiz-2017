@@ -70,8 +70,15 @@ async function adminGameAction(action){
  if(action==='presentation-next'){
   const {data,error}=await supabaseClient.rpc('quiz_presentation_next');
   if(error){notify(error.message);return}
-  // The server returns the authoritative new slide; do not wait for three reads.
+  // Keep slide updates fast, but refresh the authoritative game snapshot
+  // when the server also advances to another question. Otherwise the pult
+  // continues rendering the previous question/review indefinitely.
+  const oldControl=gameControl();
+  const crossedQuestionBoundary=oldControl.phase==='review' && presentationState.stage==='review_explanation';
   if(data&&typeof data.stage==='string')presentationState=data;
+  if(crossedQuestionBoundary || data?.stage==='round_results'){
+   await refreshGameSnapshot(false);
+  }
   // Start each music clip only after the host advances the synchronized
   // presentation. The TV receives the event through quiz_audio_events.
   const control=gameControl();
