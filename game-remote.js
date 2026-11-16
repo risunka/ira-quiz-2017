@@ -29,7 +29,7 @@ function currentRoundName(){const c=gameControl();if(c.round_no===5)return c.que
 function isAnswerSubmitted(){return gameSnapshot?.my_answer!==null&&gameSnapshot?.my_answer!==undefined}
 function remoteCanAnswer(){const p=gameSnapshot?.participant,c=gameControl();if(!p||c.phase!=='question'||presentationState.stage!=='answers')return false;if(timerState.status==='running'&&timerRemaining()<=0)return false;if(timerState.status==='stopped'&&Number(timerState.remaining_seconds)===0)return false;if(c.round_no===5&&c.question_no===2){const rows=gameSnapshot?.leaderboard?.individual||[];if(!rows.length)return false;const highest=Math.max(...rows.map(r=>Number(r.points)||0));return rows.some(r=>r.participant_id===p.id&&Number(r.points)===highest)}if(isTeamQuestion(c))return !!p.team_id&&!!p.is_captain;return true}
 function ensureGameDraft(q){const c=gameControl(),sequence=c.round_no===2||(c.round_no===0&&c.question_no===0),key=`${c.round_no}_${c.question_no}_${sequence?presentationState.stage:'main'}`;if(gameDraftKey!==key){gameDraftKey=key;gameDraft=q.type==='order'?(q.labels||[]).map((_,i)=>i):q.type==='multi'?[]:q.type==='number'?'':-1}}
-function currentReviewRaw(){const c=gameControl();return (gameSnapshot?.review_questions||[]).find(x=>Number(x.round_no)===Number(c.round_no)&&Number(x.question_no)===Number(c.question_no))||null}
+function currentReviewRaw(){const c=gameControl();return (gameSnapshot?.review_questions||[]).find(x=>Number(x.round_no)===Number(c.round_no)&&Number(x.question_no)===Number(c.phase==='review'?presentationState.question_no:c.question_no))||null}
 function publicQuestion(raw){if(!raw)return null;return {...raw.public_payload,title:raw.title,prompt:raw.prompt,type:raw.kind,max_points:raw.max_points,strict:raw.strict_order,round_no:raw.round_no,question_no:raw.question_no}}
 async function refreshGameSnapshot(shouldRender=true){
  if(!supabaseClient)return;
@@ -74,9 +74,9 @@ async function adminGameAction(action){
   // when the server also advances to another question. Otherwise the pult
   // continues rendering the previous question/review indefinitely.
   const oldControl=gameControl();
-  const crossedQuestionBoundary=oldControl.phase==='review' && presentationState.stage==='review_explanation';
+  const crossedQuestionBoundary=false; // Review stays in the same round until all answers are revealed.
   if(data&&typeof data.stage==='string')presentationState=data;
-  if(crossedQuestionBoundary || data?.stage==='round_results'){
+  if(crossedQuestionBoundary || (oldControl.phase==='review' && data?.stage==='review_options') || data?.stage==='round_results'){
    await refreshGameSnapshot(false);
   }
   // Start each music clip only after the host advances the synchronized
@@ -180,7 +180,7 @@ function tvReview(q,raw){const stage=presentationState.stage||'review_options',c
  const visualReveal=['order','multi','media-select'].includes(q.type);
  const revealTitle=q.type==='multi'?'Пять фактов — правда':q.type==='media-select'?'Вот тот самый мем':q.type==='order'?(q.images?'Правильная хронология':'Рейтинг Иры'):reviewAnswerText(q,raw.correct_answer);
  const content=stage==='review_explanation'?`<section class="tv-explanation-stage ${visualReveal?'has-visual-reveal':''}"><div class="tv-top">РАУНД ${c.round_no+1} · РАЗБОР</div><div class="tv-reveal-burst">✓</div><div class="tv-reveal-kicker">ПРАВИЛЬНЫЙ ОТВЕТ</div><h1 class="tv-title">${h(revealTitle)}</h1>${visualReveal?answerOptionsHtml(q,true,'correct',raw.correct_answer):''}${raw.explanation?`<p class="tv-prompt">${h(raw.explanation)}</p>`:''}${q.revealImage?remoteImage(q.revealImage,'tv-reveal-image',false):(!visualReveal&&q.image?remoteImage(q.image,'tv-reveal-image',false):'')}${q.audio_reveal?`<div class="tv-audio-note">♫ ${h(q.audio_reveal.label||'Правильное продолжение прозвучало')}</div>`:''}</section>`:
- `<section class="tv-review-stage"><div class="tv-top"><span>РАУНД ${c.round_no+1} · РАЗБОР</span><span>ВОПРОС ${c.question_no+1} ИЗ ${ROUND_COUNTS[c.round_no]}</span></div><h1 class="tv-title">${stage==='review_correct'?'Правильный ответ':'Разбираем вопрос'}</h1><h2 class="tv-review-question-title">${h(q.title)}</h2><p class="tv-prompt">${h(q.prompt)}</p>${q.type==='number'?`<div class="tv-number-review">${answerVisible?h(reviewAnswerText(q,raw.correct_answer)):'Ответ — число'}</div>`:answerOptionsHtml(q,true,answerVisible?'correct':'options',raw.correct_answer)}${q.image?questionMedia(q,true):''}</section>`;
+ `<section class="tv-review-stage"><div class="tv-top"><span>РАУНД ${c.round_no+1} · РАЗБОР</span><span>ВОПРОС ${Number(presentationState.question_no)+1} ИЗ ${ROUND_COUNTS[c.round_no]}</span></div><h1 class="tv-title">${stage==='review_correct'?'Правильный ответ':'Разбираем вопрос'}</h1><h2 class="tv-review-question-title">${h(q.title)}</h2><p class="tv-prompt">${h(q.prompt)}</p>${q.type==='number'?`<div class="tv-number-review">${answerVisible?h(reviewAnswerText(q,raw.correct_answer)):'Ответ — число'}</div>`:answerOptionsHtml(q,true,answerVisible?'correct':'options',raw.correct_answer)}${q.image?questionMedia(q,true):''}</section>`;
  return content;
 }
 function screenView(){
@@ -212,11 +212,11 @@ function adminPultView(){
    controls=`<h2>${h(q?.title||(isMusic?'Музыкальный вопрос':'Вопрос с мемами'))}</h2><div class="remote-preview"><b>${stageLabel}</b><div class="remote-preview-meta">${stage==='intro'?h(isMusic?musicRules(q):'Показываем четыре мема по очереди. После показа появятся варианты ответа.'):h(isMusic?clip?.label||'Аудиофрагмент':q.options?.[presentationState.clip_index]||'Мем')}</div></div>${isMusic?hostAudioPanel(q):''}<button class="primary remote-action" data-gq-action="presentation-next">${stage==='intro'?(isMusic?'Начать прослушивание':'Показать первый мем'):Number(presentationState.clip_index)+1<count?(isMusic?'Следующий фрагмент →':'Следующий мем →'):'Перейти к вариантам ответа →'}</button><p class="remote-help">Каждый переход переключает телевизор${isMusic?' и запускает аудио':''}.</p>`;
   }else{
    const isLast=(c.round_no===5)||(c.round_no<5&&c.question_no===(ROUND_COUNTS[c.round_no]||1)-1),advanceAction=ready?'next_question':'close_question';
-   controls=`<h2>${h(q?.title||'Текущий вопрос')}</h2><div class="remote-preview"><b>${h(q?.prompt||'')}</b><div class="remote-preview-meta">${isTeamQuestion(c)?'Командный ответ · только капитан':'Индивидуальный ответ'}</div></div>${isMusic?hostAudioPanel(q):''}<div class="remote-status"><div class="remote-countline"><span>Получено ответов</span><b>${gameSnapshot.submission_count}/${gameSnapshot.required_count}</b></div><div class="remote-progress"><span style="width:${gameSnapshot.required_count?100*gameSnapshot.submission_count/gameSnapshot.required_count:0}%"></span></div></div>${timerHostMarkup()}<p class="remote-help">После закрытия вопроса сначала покажем варианты, затем правильный ответ и объяснение.</p><button class="primary remote-action" data-gq-action="${advanceAction}">${ready?'Закрыть ответы и начать разбор':'Закрыть приём ответов досрочно'}</button>`;
+   controls=`<h2>${h(q?.title||'Текущий вопрос')}</h2><div class="remote-preview"><b>${h(q?.prompt||'')}</b><div class="remote-preview-meta">${isTeamQuestion(c)?'Командный ответ · только капитан':'Индивидуальный ответ'}</div></div>${isMusic?hostAudioPanel(q):''}<div class="remote-status"><div class="remote-countline"><span>Получено ответов</span><b>${gameSnapshot.submission_count}/${gameSnapshot.required_count}</b></div><div class="remote-progress"><span style="width:${gameSnapshot.required_count?100*gameSnapshot.submission_count/gameSnapshot.required_count:0}%"></span></div></div>${timerHostMarkup()}<p class="remote-help">Ответы раскроем после всех вопросов раунда.</p><button class="primary remote-action" data-gq-action="${advanceAction}">${ready?(isLast?'Завершить вопросы и начать разбор →':'Следующий вопрос →'):'Закрыть приём ответов досрочно'}</button>`;
   }
  }else if(c.phase==='review'){
-  const raw=currentReviewRaw(),rq=publicQuestion(raw),last=c.question_no===(ROUND_COUNTS[c.round_no]||1)-1;
-  if(stage==='review_options')controls=`<h2>Разбор · вопрос ${c.question_no+1} из ${ROUND_COUNTS[c.round_no]||1}</h2><div class="remote-preview"><b>${h(rq?.title||'')}</b><div class="remote-preview-meta">Сначала показываем все варианты без подсказки.</div></div><button class="primary remote-action" data-gq-action="presentation-next">Показать правильный ответ →</button>`;
+  const raw=currentReviewRaw(),rq=publicQuestion(raw),reviewNo=Number(presentationState.question_no)||0,last=reviewNo===(ROUND_COUNTS[c.round_no]||1)-1;
+  if(stage==='review_options')controls=`<h2>Разбор · вопрос ${reviewNo+1} из ${ROUND_COUNTS[c.round_no]||1}</h2><div class="remote-preview"><b>${h(rq?.title||'')}</b><div class="remote-preview-meta">Сначала показываем все варианты без подсказки.</div></div><button class="primary remote-action" data-gq-action="presentation-next">Показать правильный ответ →</button>`;
   else if(stage==='review_correct')controls=`<h2>Правильный ответ</h2><div class="remote-preview"><b>${h(rq?.title||'')}</b><div class="remote-preview-answer">${h(raw?reviewAnswerText(rq,raw.correct_answer):'')}</div></div><button class="primary remote-action" data-gq-action="presentation-next">Показать пояснение и оригинал →</button>`;
   else if(stage==='review_explanation')controls=`<h2>Пояснение и оригинал</h2>${rq?.audio_reveal?`<button class="outline remote-action" data-gq-action="repeat-audio">↻ Повторить правильный аудиофрагмент</button>`:''}${last?'<button class="primary remote-action" data-gq-action="presentation-next">Показать итоги раунда →</button>':'<button class="primary remote-action" data-gq-action="presentation-next">Открыть следующий вопрос →</button>'}`;
   else if(stage==='round_results'){
@@ -283,7 +283,7 @@ async function initRemoteGame(){
   // The realtime row already contains the next slide and clip index.
   if(payload.new&&typeof payload.new.stage==='string'){
    presentationState=payload.new;
-   if(gameSnapshot&&Number(gameControl().round_no)===Number(payload.new.round_no)&&Number(gameControl().question_no)===Number(payload.new.question_no)){render();return}
+   if(gameSnapshot&&gameControl().phase!=='review'&&Number(gameControl().round_no)===Number(payload.new.round_no)&&Number(gameControl().question_no)===Number(payload.new.question_no)){render();return}
   }
   refreshGameSnapshot();
  }).subscribe();
