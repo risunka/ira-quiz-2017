@@ -6,6 +6,18 @@ const IS_TV=new URLSearchParams(location.search).get('screen')==='1';
 const IS_HOST_REMOTE=new URLSearchParams(location.search).get('admin')==='1';
 let gameSnapshot=null,gameDraft=null,gameDraftKey='',gameChannel=null,tvAudioChannel=null,presentationChannel=null,timerChannel=null;
 let presentationState={stage:'idle',clip_index:0,round_no:-1,question_no:-1};
+// Preload current question images so each TV slide is instant after synchronization.
+const iraSlideImageCache=new Map();
+function preloadQuestionImages(){
+ const q=currentQuestionRemote();
+ if(!IS_TV||!q)return;
+ const files=[...(Array.isArray(q.images)?q.images:[]),q.image,q.revealImage].filter(Boolean);
+ for(const file of files){
+  if(iraSlideImageCache.has(file))continue;
+  const img=new Image();img.decoding='async';img.src='assets/'+file;iraSlideImageCache.set(file,img);
+ }
+}
+
 let timerState={status:'idle',duration_seconds:30,remaining_seconds:30,deadline_at:null};
 let tvAudioUnlocked=false,lastTvClip='',timerExpiryRequested=false,timerInterval=null,answerSending=false,hostActionRunning=false;
 const ROUND_TITLES=ROUNDS.map(r=>r.title),ROUND_COUNTS=ROUNDS.map(r=>r.questions.length);
@@ -31,6 +43,7 @@ async function refreshGameSnapshot(shouldRender=true){
  gameSnapshot=snap.data;
  if(pres.data)presentationState=pres.data;
  if(timer.data)timerState=timer.data;
+ preloadQuestionImages();
  if(shouldRender)render();
 }
 async function joinRemote(){const name=document.getElementById('personname')?.value.trim();if(!name){notify('Введи имя');return}const {data,error}=await supabaseClient.rpc('register_guest_secure',{p_display_name:name});if(error){notify(error.message.includes('уже зарегистрирован')?'Это имя уже зарегистрировано':error.message.includes('заняты')?'Все 11 мест уже заняты':'Не удалось зарегистрироваться: '+error.message);return}userId=data.participant_id;localStorage.setItem('ira_self',userId);localStorage.setItem(GUEST_TOKEN_KEY,data.token);await loadRemoteRoster();await refreshGameSnapshot(false);setPage('game');notify('Ты зарегистрирована! Команду назначит организатор.')}
@@ -55,9 +68,10 @@ async function adminGameAction(action){
  document.querySelectorAll('[data-gq-action]').forEach(b=>{if(b.closest('.remote-shell'))b.disabled=true});
  try{
  if(action==='presentation-next'){
-  const {error}=await supabaseClient.rpc('quiz_presentation_next');
+  const {data,error}=await supabaseClient.rpc('quiz_presentation_next');
   if(error){notify(error.message);return}
-  await refreshGameSnapshot(false);
+  // The server returns the authoritative new slide; do not wait for three reads.
+  if(data&&typeof data.stage==='string')presentationState=data;
   // Start each music clip only after the host advances the synchronized
   // presentation. The TV receives the event through quiz_audio_events.
   const control=gameControl();
@@ -258,7 +272,14 @@ async function initRemoteGame(){
  await loadRemoteRoster();await refreshGameSnapshot(false);
  if(IS_TV)tvAudioChannel=supabaseClient.channel('ira-quiz-audio-v5').on('postgres_changes',{event:'INSERT',schema:'public',table:'quiz_audio_events'},payload=>handleTvAudioEvent(payload.new)).subscribe();
  gameChannel=supabaseClient.channel('ira-game-live-v5').on('postgres_changes',{event:'*',schema:'public',table:'quiz_control'},()=>refreshGameSnapshot()).on('postgres_changes',{event:'*',schema:'public',table:'teams'},async()=>{await loadRemoteRoster();await refreshGameSnapshot(false);render()}).on('postgres_changes',{event:'*',schema:'public',table:'participants'},async()=>{await loadRemoteRoster();await refreshGameSnapshot(false);render()}).subscribe();
- presentationChannel=supabaseClient.channel('ira-presentation-v5').on('postgres_changes',{event:'*',schema:'public',table:'quiz_presentation_state'},()=>refreshGameSnapshot()).subscribe();
+ presentationChannel=supabaseClient.channel('ira-presentation-v5').on('postgres_changes',{event:'*',schema:'public',table:'quiz_presentation_state'},payload=>{
+  // The realtime row already contains the next slide and clip index.
+  if(payload.new&&typeof payload.new.stage==='string'){
+   presentationState=payload.new;
+   if(gameSnapshot&&Number(gameControl().round_no)===Number(payload.new.round_no)&&Number(gameControl().question_no)===Number(payload.new.question_no)){render();return}
+  }
+  refreshGameSnapshot();
+ }).subscribe();
  timerChannel=supabaseClient.channel('ira-timer-v5').on('postgres_changes',{event:'*',schema:'public',table:'quiz_timer_state'},()=>refreshGameSnapshot()).subscribe();
  supabaseClient.auth.onAuthStateChange(async(_event,session)=>{admin=!!session&&session.user?.id===ORGANIZER_UID;if(session&&!admin)await supabaseClient.auth.signOut();await refreshGameSnapshot(false);render()});
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshGameSnapshot()});
