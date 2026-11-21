@@ -65,7 +65,7 @@ async function refreshGameSnapshot(shouldRender=true){
  preloadQuestionImages();
  if(shouldRender)render();
  // After reconnect, advance immediately if the last answer has already arrived.
- if(gameControl().phase==='question'&&presentationState.stage==='answers'&&Number(gameSnapshot?.required_count)>0&&Number(gameSnapshot?.submission_count)>=Number(gameSnapshot?.required_count))requestQuizAutoAdvance();
+ // Completion is handled atomically by the Supabase answer trigger.
 }
 // One server-authoritative transition handles both last response and timer expiry.
 // The RPC is atomic: simultaneous calls from TV, host and players cannot skip a question.
@@ -99,8 +99,8 @@ async function submitRemoteAnswer(){
  try{
   const {error}=await supabaseClient.rpc('submit_quiz_answer_v5',{p_participant_id:p.id,p_token:localStorage.getItem(GUEST_TOKEN_KEY),p_answer:answer});
   if(error){notify(error.message);return}
-  // Only a completed count or expired server deadline can cause advancement.
-  await requestQuizAutoAdvance(true);
+  // The database AFTER INSERT trigger advances atomically on the final answer.
+  // Reload only after commit so the phone gets the next question, not a stale snapshot.
   await refreshGameSnapshot(false);render();notify('Ответ принят. Изменить его нельзя.');
  }catch(err){console.error('submit quiz answer',err);notify('Ошибка соединения. Проверь интернет и попробуй ещё раз.')}
  finally{answerSending=false}
@@ -305,7 +305,7 @@ document.addEventListener('touchmove',e=>{if(!touchOrderDrag)return;const touch=
 function finishTouchOrderDrag(){if(!touchOrderDrag)return;const {from,to}=touchOrderDrag;touchOrderDrag.item.classList.remove('is-dragging');document.querySelectorAll('.phone-order-item.is-drop-target').forEach(n=>n.classList.remove('is-drop-target'));touchOrderDrag=null;moveQuizOrder(from,to)}
 document.addEventListener('touchend',e=>{if(touchOrderDrag&&Array.from(e.changedTouches).some(t=>t.identifier===touchOrderDrag.id))finishTouchOrderDrag()},{passive:true});
 document.addEventListener('touchcancel',()=>{if(touchOrderDrag){touchOrderDrag.item.classList.remove('is-dragging');document.querySelectorAll('.phone-order-item.is-drop-target').forEach(n=>n.classList.remove('is-drop-target'));touchOrderDrag=null}},{passive:true});
-function timerTick(){const remaining=timerRemaining(),duration=Math.max(1,Number(timerState.duration_seconds)||30),pct=Math.max(0,Math.min(100,remaining/duration*100));document.querySelectorAll('[data-timer-value]').forEach(n=>n.textContent=formatClock(remaining));document.querySelectorAll('[data-timer-progress]').forEach(n=>n.style.width=pct+'%');document.querySelectorAll('.tv-timer,.player-timer').forEach(n=>{n.classList.toggle('is-warning',remaining<=10);n.classList.toggle('is-critical',remaining<=5)});if(gameControl().phase==='question'&&presentationState.stage==='answers'&&((timerState.status==='running'&&remaining<=0)||(timerState.status==='stopped'&&Number(timerState.remaining_seconds)===0))){requestQuizAutoAdvance()}}
+function timerTick(){const remaining=timerRemaining(),duration=Math.max(1,Number(timerState.duration_seconds)||30),pct=Math.max(0,Math.min(100,remaining/duration*100));document.querySelectorAll('[data-timer-value]').forEach(n=>n.textContent=formatClock(remaining));document.querySelectorAll('[data-timer-progress]').forEach(n=>n.style.width=pct+'%');document.querySelectorAll('.tv-timer,.player-timer').forEach(n=>{n.classList.toggle('is-warning',remaining<=10);n.classList.toggle('is-critical',remaining<=5)});/* Deadline is checked by Supabase via quiz_auto_advance, not local phone clocks. */}
 async function unlockTvAudio(){const player=document.getElementById('quiz-tv-audio');if(!player)return;try{player.src='assets/audio/quiz_silence.wav';player.volume=0;await player.play();player.pause();player.currentTime=0;player.volume=1;tvAudioUnlocked=true;const hint=document.getElementById('tv-audio-hint');if(hint)hint.textContent='Звук готов · управление с телефона';document.querySelector('[data-gq-audio-unlock]')?.remove();const q=currentQuestionRemote(),clip=currentAudioClip(q);if(gameControl().phase==='question'&&presentationState.stage==='audio'&&clip?.file)playTvClip(clip.file)}catch(e){notify('Не удалось активировать звук в этом браузере')}}
 function playTvClip(file){const player=document.getElementById('quiz-tv-audio');if(!player||!file)return;player.pause();player.src='assets/audio/'+file;player.currentTime=0;player.load();player.play().catch(()=>{const hint=document.getElementById('tv-audio-hint');if(hint)hint.textContent='Нажми «Разрешить звук» на экране телевизора один раз.'});lastTvClip=file}
 function handleTvAudioEvent(row){if(!IS_TV||!row)return;if(row.action==='stop'){const p=document.getElementById('quiz-tv-audio');p?.pause();if(p)p.currentTime=0;return}if(row.clip)playTvClip(row.clip)}
@@ -326,6 +326,26 @@ async function initRemoteGame(){
  timerChannel=supabaseClient.channel('ira-timer-v5').on('postgres_changes',{event:'*',schema:'public',table:'quiz_timer_state'},()=>refreshGameSnapshot()).subscribe();
  supabaseClient.auth.onAuthStateChange(async(_event,session)=>{admin=!!session&&session.user?.id===ORGANIZER_UID;if(session&&!admin)await supabaseClient.auth.signOut();await refreshGameSnapshot(false);render()});
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshGameSnapshot()});
- if(timerInterval)clearInterval(timerInterval);timerInterval=setInterval(timerTick,250);setInterval(()=>{if(!document.hidden&&timerState.status==='running')refreshGameSnapshot(false)},20000);render();
+ if(timerInterval)clearInterval(timerInterval);
+ timerInterval=setInterval(timerTick,250);
+ // The live TV/host asks Supabase whether the deadline has passed.
+ // Supabase alone decides and updates quiz_control; no local clock comparisons.
+ setInterval(()=>{
+  if(document.hidden||!supabaseClient)return;
+  const c=gameControl();
+  if((IS_TV||IS_HOST_REMOTE)&&c.phase==='question'&&c.round_no>=0&&c.round_no<=4
+     &&presentationState.stage==='answers'&&timerState.status==='running'){
+    requestQuizAutoAdvance();
+  }
+ },1500);
+ // Realtime fall-back for all devices, including old phones that missed an event.
+ setInterval(async()=>{
+  if(document.hidden||!supabaseClient)return;
+  const before=gameControl(),key=`${before.phase}:${before.round_no}:${before.question_no}:${presentationState.stage}`;
+  await refreshGameSnapshot(false);
+  const after=gameControl(),updated=`${after.phase}:${after.round_no}:${after.question_no}:${presentationState.stage}`;
+  if(updated!==key)render();
+ },3500);
+ render();
 }
 initRemoteGame();
