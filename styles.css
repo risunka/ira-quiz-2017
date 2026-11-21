@@ -865,3 +865,112 @@ body.screen-mode .tv-review-stage
     margin: 0 auto;
   }
 }
+
+
+/* IRA QUIZ — 4-image chronology, final reveal AND question/review slides.
+   Real correct-answer markup is .tv-explanation-stage.has-visual-reveal,
+   not .tv-review-stage. Keep the picture and its label in the SAME card. */
+@media (min-width: 701px) {
+  body.screen-mode .tv-wrap.tv-phase-review
+    .tv-explanation-stage.has-visual-reveal:has(> .tv-order-grid:not(.country-ranking) .tv-order-image) {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    gap: clamp(5px, .7vh, 10px);
+    padding: 0 clamp(16px, 3vw, 48px) clamp(8px, 1vh, 14px);
+    overflow: hidden;
+  }
+  body.screen-mode .tv-wrap.tv-phase-review
+    .tv-explanation-stage.has-visual-reveal:has(> .tv-order-grid:not(.country-ranking) .tv-order-image)
+    > :not(.tv-order-grid) {
+    flex: 0 0 auto;
+    margin-block: 0;
+  }
+  body.screen-mode .tv-wrap.tv-phase-review
+    .tv-explanation-stage.has-visual-reveal:has(> .tv-order-grid:not(.country-ranking) .tv-order-image)
+    > .tv-reveal-burst {
+    width: clamp(40px, 5vh, 55px);
+    height: clamp(40px, 5vh, 55px);
+    font-size: clamp(26px, 3.5vh, 38px);
+  }
+  body.screen-mode .tv-wrap.tv-phase-review
+    .tv-explanation-stage.has-visual-reveal:has(> .tv-order-grid:not(.country-ranking) .tv-order-image)
+    > .tv-title {
+    font-size: clamp(28px, 3vw, 52px);
+    line-height: 1.05;
+  }
+  body.screen-mode .tv-wrap.tv-phase-review
+    .tv-explanation-stage.has-visual-reveal
+    > .tv-order-grid:not(.country-ranking):has(.tv-order-image) {
+    box-sizing: border-box;
+    display: grid;
+    flex: 1 1 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: clamp(10px, 1.2vh, 16px);
+    align-content: stretch;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+  }
+}
+
+/* Shared for all TV phases showing a 2x2 photo-order grid. */
+body.screen-mode .tv-wrap
+  .tv-order-grid:not(.country-ranking):has(.tv-order-image) > .tv-order-card {
+  position: relative;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: stretch;
+  justify-items: stretch;
+  gap: clamp(3px, .45vh, 7px);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: clamp(8px, 1vh, 13px);
+  transform: none;
+}
+body.screen-mode .tv-wrap
+  .tv-order-grid:not(.country-ranking):has(.tv-order-image) > .tv-order-card > .tv-order-image {
+  box-sizing: border-box;
+  display: block;
+  grid-column: 1;
+  grid-row: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  align-self: stretch;
+  justify-self: stretch;
+  margin: 0;
+}
+body.screen-mode .tv-wrap
+  .tv-order-grid:not(.country-ranking):has(.tv-order-image) > .tv-order-card > .tv-order-name {
+  box-sizing: border-box;
+  display: block;
+  grid-column: 1;
+  grid-row: 2;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  max-width: 100%;
+  font-size: clamp(16px, 1.5vw, 26px);
+  line-height: 1.1;
+  text-align: center;
+  align-self: center;
+}
