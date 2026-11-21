@@ -805,3 +805,63 @@ body.screen-mode .tv-review-stage
     transform: none;
   }
 }
+
+
+/* IRA QUIZ: TV review images stay BELOW the choices, not on top of them.
+   Targets actual tvReview() markup: section.tv-review-stage >
+   .tv-choice-grid + .quiz-image-frame > img.tv-media. */
+@media (min-width: 701px) {
+  body.screen-mode .tv-wrap.tv-phase-review .tv-review-stage:has(> .tv-choice-grid + .quiz-image-frame) {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+    gap: clamp(5px, .65vh, 10px);
+  }
+  body.screen-mode .tv-wrap.tv-phase-review .tv-review-stage > .tv-choice-grid:has(+ .quiz-image-frame) {
+    flex: 0 0 auto;
+    position: relative;
+    z-index: 1;
+    grid-template-rows: repeat(2, minmax(0, auto));
+    gap: clamp(8px, 1vh, 14px);
+    margin: 0;
+  }
+  body.screen-mode .tv-wrap.tv-phase-review .tv-review-stage > .tv-choice-grid:has(+ .quiz-image-frame) > .tv-option {
+    min-height: clamp(66px, 8vh, 90px);
+    height: auto;
+    padding-block: clamp(7px, .9vh, 13px);
+    font-size: clamp(18px, 1.55vw, 27px);
+  }
+  body.screen-mode .tv-wrap.tv-phase-review .tv-review-stage > .quiz-image-frame {
+    position: relative !important;
+    inset: auto !important;
+    transform: none !important;
+    flex: 1 1 0;
+    align-self: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 0;
+    max-height: min(32vh, 300px);
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    z-index: 0;
+  }
+  body.screen-mode .tv-wrap.tv-phase-review .tv-review-stage > .quiz-image-frame > .tv-media {
+    display: block;
+    position: static !important;
+    transform: none !important;
+    flex: 0 1 auto;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    margin: 0 auto;
+  }
+}
