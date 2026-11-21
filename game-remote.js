@@ -19,6 +19,8 @@ function preloadQuestionImages(){
 }
 
 let timerState={status:'idle',duration_seconds:30,remaining_seconds:30,deadline_at:null};
+// Server clock is authoritative. Each device calibrates its own clock skew.
+let quizServerClockOffsetMs=0, quizServerClockReady=false;
 let tvAudioUnlocked=false,lastTvClip='',timerExpiryRequested=false,timerInterval=null,answerSending=false,hostActionRunning=false;
 const ROUND_TITLES=ROUNDS.map(r=>r.title),ROUND_COUNTS=ROUNDS.map(r=>r.questions.length);
 const COUNTRY_FLAGS={'Исландия':'🇮🇸','Италия':'🇮🇹','Япония':'🇯🇵','Австралия':'🇦🇺','Аргентина':'🇦🇷'};
@@ -35,12 +37,27 @@ function publicQuestion(raw){if(!raw)return null;return {...raw.public_payload,t
 async function refreshGameSnapshot(shouldRender=true){
  if(!supabaseClient)return;
  const pid=localStorage.getItem('ira_self')||null,token=localStorage.getItem(GUEST_TOKEN_KEY)||null;
- const [snap,pres,timer]=await Promise.all([
+ // Capture the server timestamp with a per-request round-trip midpoint.
+ // This eliminates the difference between the TV's and phone's local clocks.
+ const serverClockPromise=(async()=>{
+  const sentAt=Date.now();
+  const result=await supabaseClient.rpc('quiz_server_now');
+  return {...result,sentAt,receivedAt:Date.now()};
+ })();
+ const [snap,pres,timer,serverClock]=await Promise.all([
   supabaseClient.rpc('get_quiz_snapshot_v5',{p_participant_id:pid,p_token:token}),
   supabaseClient.from('quiz_presentation_state').select('*').eq('id',1).maybeSingle(),
-  supabaseClient.from('quiz_timer_state').select('*').eq('id',1).maybeSingle()
+  supabaseClient.from('quiz_timer_state').select('*').eq('id',1).maybeSingle(),
+  serverClockPromise
  ]);
  if(snap.error){console.error('get_quiz_snapshot_v5',snap.error);if(shouldRender)notify('Не удалось обновить состояние игры');return}
+ if(!serverClock.error&&serverClock.data){
+  const timestamp=Date.parse(serverClock.data);
+  if(Number.isFinite(timestamp)){
+   quizServerClockOffsetMs=timestamp-(serverClock.sentAt+serverClock.receivedAt)/2;
+   quizServerClockReady=true;
+  }
+ }else if(serverClock.error){console.warn('Server clock synchronization unavailable:',serverClock.error.message)}
  gameSnapshot=snap.data;
  if(pres.data)presentationState=pres.data;
  if(timer.data)timerState=timer.data;
@@ -157,7 +174,7 @@ function remoteLobby(){const p=gameSnapshot?.participant;let lines=state.people.
 function guestRegistration(){const c=gameControl();if(c.phase!=='lobby')return panel('<div class="pad"><h2>Регистрация закрыта</h2><p class="muted">Игра уже началась. Попроси организатора помочь с доступом.</p></div>');return `<section class="panel"><div class="pad"><h2 class="h1">Заявка в друзья</h2><p class="muted">Добавься к Ире, чтобы получить доступ к вписке.</p><label class="formlabel" for="personname">Имя участника</label><input class="input" id="personname" placeholder="Как тебя зовут?" maxlength="40" autocomplete="name"><p class="stepnote">Команду назначит организатор на мероприятии.</p><button class="primary wide" data-gq-action="join" ${state.people.length>=11?'disabled':''}>Отправить заявку</button><p class="muted tiny">${state.people.length}/11 мест занято</p></div></section>`}
 function remoteGame(){const c=gameControl(),p=gameSnapshot?.participant;if(c.phase==='lobby'&&!p&&!admin)return guestRegistration()+remoteAdminEntry();let body=`<div class="game-hero"><div class="eyebrow">Ира Перцовская · 2017</div><h1>Кто меня знает, тот знает</h1><p>Четыре командных раунда, затем индивидуальный экзамен на близость.</p></div>`;if(c.phase==='lobby')body+=remoteLobby();else if(c.phase==='question')body+=remoteQuestionCard();else if(c.phase==='review')body+=remoteReview();else body+=`<div class="game-hero"><h1>Вписка окончена 🎉</h1><p>Спасибо за игру!</p></div>${remoteScorePanel()}`;body+=remoteAdminEntry();return body}
 function remoteAdminEntry(){return admin?`<div class="panel"><div class="pad"><a href="?admin=1" class="outline">Открыть пульт ведущей</a></div></div>`:`<div class="panel"><div class="pad"><button class="outline" data-gq-action="toggle-login">Я организатор · открыть управление</button>${adminLoginOpen?`<div class="admin-controls"><label class="formlabel" for="admin-email">Электронная почта организатора</label><input class="input" id="admin-email" type="email" autocomplete="username" placeholder="Email"><label class="formlabel" for="admin-password">Пароль</label><input class="input" id="admin-password" type="password" autocomplete="current-password" placeholder="Пароль"><button class="primary wide" data-gq-action="login">Войти в админку</button></div>`:''}</div></div>`}
-function timerRemaining(){if(timerState.status==='running'&&timerState.deadline_at)return Math.max(0,Math.ceil((new Date(timerState.deadline_at).getTime()-Date.now())/1000));if(timerState.status==='paused')return Math.max(0,Number(timerState.remaining_seconds)||0);return Math.max(0,Number(timerState.remaining_seconds)||0)}
+function timerRemaining(){if(timerState.status==='running'&&timerState.deadline_at){const now=Date.now()+(quizServerClockReady?quizServerClockOffsetMs:0);const remaining=Math.ceil((new Date(timerState.deadline_at).getTime()-now)/1000);return Math.max(0,Math.min(Number(timerState.duration_seconds)||30,remaining));}if(timerState.status==='paused')return Math.max(0,Number(timerState.remaining_seconds)||0);return Math.max(0,Number(timerState.remaining_seconds)||0)}
 function formatClock(s){const n=Math.max(0,Math.ceil(s));return `${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`}
 function timerMarkup(){if(!timerState||timerState.status==='idle'||timerState.status==='stopped')return '';const remaining=timerRemaining(),duration=Math.max(1,Number(timerState.duration_seconds)||30),pct=Math.max(0,Math.min(100,remaining/duration*100));return `<div class="tv-timer ${remaining<=10?'is-warning':''} ${remaining<=5?'is-critical':''}"><div class="tv-timer-label">ВРЕМЯ НА ОТВЕТ</div><strong data-timer-value>${formatClock(remaining)}</strong><div class="tv-timer-track"><span data-timer-progress style="width:${pct}%"></span></div></div>`}
 function timerHostMarkup(){const status=timerState.status||'idle',remaining=timerRemaining(),duration=Number(timerState.duration_seconds)||30;return `<section class="host-timer"><div class="host-timer-top"><b>Таймер ответа</b><strong data-timer-value>${formatClock(remaining)}</strong></div><div class="remote-progress"><span data-timer-progress style="width:${Math.min(100,remaining/Math.max(1,duration)*100)}%"></span></div><div class="host-timer-actions">${status==='running'?'<button class="outline" data-gq-action="timer-pause">Пауза</button>':status==='paused'?'<button class="outline" data-gq-action="timer-resume">Продолжить</button>':'<button class="outline" data-gq-action="timer-set">Запустить таймер</button>'}<button class="outline" data-gq-action="timer-add">+15 сек.</button><button class="outline" data-gq-action="timer-reset">Сбросить</button></div><div class="host-timer-set"><input id="timer-set-seconds" type="number" min="10" max="600" value="${duration}" aria-label="Время в секундах"><button class="secondary" data-gq-action="timer-set">Установить, сек.</button></div><p class="remote-help">${status==='running'?'Идёт отсчёт. По нулю ответы автоматически закроются.':status==='paused'?'Таймер на паузе.':'Таймер ожидает запуска.'}</p></section>`}
@@ -284,6 +301,6 @@ async function initRemoteGame(){
  timerChannel=supabaseClient.channel('ira-timer-v5').on('postgres_changes',{event:'*',schema:'public',table:'quiz_timer_state'},()=>refreshGameSnapshot()).subscribe();
  supabaseClient.auth.onAuthStateChange(async(_event,session)=>{admin=!!session&&session.user?.id===ORGANIZER_UID;if(session&&!admin)await supabaseClient.auth.signOut();await refreshGameSnapshot(false);render()});
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshGameSnapshot()});
- if(timerInterval)clearInterval(timerInterval);timerInterval=setInterval(timerTick,250);render();
+ if(timerInterval)clearInterval(timerInterval);timerInterval=setInterval(timerTick,250);setInterval(()=>{if(!document.hidden&&timerState.status==='running')refreshGameSnapshot(false)},20000);render();
 }
 initRemoteGame();
