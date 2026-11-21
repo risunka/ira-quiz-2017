@@ -22,6 +22,7 @@ let timerState={status:'idle',duration_seconds:30,remaining_seconds:30,deadline_
 // Server clock is authoritative. Each device calibrates its own clock skew.
 let quizServerClockOffsetMs=0, quizServerClockReady=false;
 let tvAudioUnlocked=false,lastTvClip='',timerExpiryRequested=false,timerInterval=null,answerSending=false,hostActionRunning=false;
+let quizAutoAdvanceBusy=false,quizAutoAdvanceLastAttempt=0;
 const ROUND_TITLES=ROUNDS.map(r=>r.title),ROUND_COUNTS=ROUNDS.map(r=>r.questions.length);
 const COUNTRY_FLAGS={'Исландия':'🇮🇸','Италия':'🇮🇹','Япония':'🇯🇵','Австралия':'🇦🇺','Аргентина':'🇦🇷'};
 function gameControl(){return gameSnapshot?.control||{phase:'lobby',round_no:0,question_no:0,actual_count:null}}
@@ -63,6 +64,28 @@ async function refreshGameSnapshot(shouldRender=true){
  if(timer.data)timerState=timer.data;
  preloadQuestionImages();
  if(shouldRender)render();
+ // After reconnect, advance immediately if the last answer has already arrived.
+ if(gameControl().phase==='question'&&presentationState.stage==='answers'&&Number(gameSnapshot?.required_count)>0&&Number(gameSnapshot?.submission_count)>=Number(gameSnapshot?.required_count))requestQuizAutoAdvance();
+}
+// One server-authoritative transition handles both last response and timer expiry.
+// The RPC is atomic: simultaneous calls from TV, host and players cannot skip a question.
+async function requestQuizAutoAdvance(force=false){
+ if(!supabaseClient||quizAutoAdvanceBusy)return;
+ const c=gameControl();
+ if(c.phase!=='question'||c.round_no<0||c.round_no>4||presentationState.stage!=='answers')return;
+ const now=Date.now();
+ if(!force&&now-quizAutoAdvanceLastAttempt<1400)return;
+ quizAutoAdvanceLastAttempt=now;
+ quizAutoAdvanceBusy=true;
+ try{
+  const {data,error}=await supabaseClient.rpc('quiz_auto_advance');
+  if(error){console.error('Автопереход IRA QUIZ:',error.message);return}
+  if(data?.advanced){
+   gameDraft=null;
+   await refreshGameSnapshot(true);
+  }
+ }catch(err){console.error('Автопереход IRA QUIZ:',err)}
+ finally{quizAutoAdvanceBusy=false}
 }
 async function joinRemote(){const name=document.getElementById('personname')?.value.trim();if(!name){notify('Введи имя');return}const {data,error}=await supabaseClient.rpc('register_guest_secure',{p_display_name:name});if(error){notify(error.message.includes('уже зарегистрирован')?'Это имя уже зарегистрировано':error.message.includes('заняты')?'Все 11 мест уже заняты':'Не удалось зарегистрироваться: '+error.message);return}userId=data.participant_id;localStorage.setItem('ira_self',userId);localStorage.setItem(GUEST_TOKEN_KEY,data.token);await loadRemoteRoster();await refreshGameSnapshot(false);setPage('game');notify('Ты зарегистрирована! Команду назначит организатор.')}
 async function submitRemoteAnswer(){
@@ -76,6 +99,8 @@ async function submitRemoteAnswer(){
  try{
   const {error}=await supabaseClient.rpc('submit_quiz_answer_v5',{p_participant_id:p.id,p_token:localStorage.getItem(GUEST_TOKEN_KEY),p_answer:answer});
   if(error){notify(error.message);return}
+  // Only a completed count or expired server deadline can cause advancement.
+  await requestQuizAutoAdvance(true);
   await refreshGameSnapshot(false);render();notify('Ответ принят. Изменить его нельзя.');
  }catch(err){console.error('submit quiz answer',err);notify('Ошибка соединения. Проверь интернет и попробуй ещё раз.')}
  finally{answerSending=false}
@@ -223,7 +248,7 @@ function adminPultView(){
    controls=`<h2>${h(q?.title||(isMusic?'Музыкальный вопрос':'Вопрос с мемами'))}</h2><div class="remote-preview"><b>${stageLabel}</b><div class="remote-preview-meta">${stage==='intro'?h(isMusic?musicRules(q):'Показываем четыре мема по очереди. После показа появятся варианты ответа.'):h(isMusic?clip?.label||'Аудиофрагмент':q.options?.[presentationState.clip_index]||'Мем')}</div></div>${isMusic?hostAudioPanel(q):''}<button class="primary remote-action" data-gq-action="presentation-next">${stage==='intro'?(isMusic?'Начать прослушивание':'Показать первый мем'):Number(presentationState.clip_index)+1<count?(isMusic?'Следующий фрагмент →':'Следующий мем →'):'Перейти к вариантам ответа →'}</button><p class="remote-help">Каждый переход переключает телевизор${isMusic?' и запускает аудио':''}.</p>`;
   }else{
    const isLast=(c.round_no===5)||(c.round_no<5&&c.question_no===(ROUND_COUNTS[c.round_no]||1)-1),advanceAction=ready?'next_question':'close_question';
-   controls=`<h2>${h(q?.title||'Текущий вопрос')}</h2><div class="remote-preview"><b>${h(q?.prompt||'')}</b><div class="remote-preview-meta">${isTeamQuestion(c)?'Командный ответ · только капитан':'Индивидуальный ответ'}</div></div>${isMusic?hostAudioPanel(q):''}<div class="remote-status"><div class="remote-countline"><span>Получено ответов</span><b>${gameSnapshot.submission_count}/${gameSnapshot.required_count}</b></div><div class="remote-progress"><span style="width:${gameSnapshot.required_count?100*gameSnapshot.submission_count/gameSnapshot.required_count:0}%"></span></div></div>${timerHostMarkup()}<p class="remote-help">После закрытия вопроса сначала покажем варианты, затем правильный ответ и объяснение.</p><button class="primary remote-action" data-gq-action="${advanceAction}">${ready?'Закрыть ответы и начать разбор':'Закрыть приём ответов досрочно'}</button>`;
+   controls=`<h2>${h(q?.title||'Текущий вопрос')}</h2><div class="remote-preview"><b>${h(q?.prompt||'')}</b><div class="remote-preview-meta">${isTeamQuestion(c)?'Командный ответ · только капитан':'Индивидуальный ответ'}</div></div>${isMusic?hostAudioPanel(q):''}<div class="remote-status"><div class="remote-countline"><span>Получено ответов</span><b>${gameSnapshot.submission_count}/${gameSnapshot.required_count}</b></div><div class="remote-progress"><span style="width:${gameSnapshot.required_count?100*gameSnapshot.submission_count/gameSnapshot.required_count:0}%"></span></div></div>${timerHostMarkup()}<p class="remote-help">После закрытия вопроса сначала покажем варианты, затем правильный ответ и объяснение.</p><button class="primary remote-action" data-gq-action="${advanceAction}">${ready?(isLast?'Перейти к разбору раунда':'Следующий вопрос'):'Закрыть приём ответов досрочно'}</button>`;
   }
  }else if(c.phase==='review'){
   const raw=currentReviewRaw(),rq=publicQuestion(raw),last=c.question_no===(ROUND_COUNTS[c.round_no]||1)-1;
@@ -280,7 +305,7 @@ document.addEventListener('touchmove',e=>{if(!touchOrderDrag)return;const touch=
 function finishTouchOrderDrag(){if(!touchOrderDrag)return;const {from,to}=touchOrderDrag;touchOrderDrag.item.classList.remove('is-dragging');document.querySelectorAll('.phone-order-item.is-drop-target').forEach(n=>n.classList.remove('is-drop-target'));touchOrderDrag=null;moveQuizOrder(from,to)}
 document.addEventListener('touchend',e=>{if(touchOrderDrag&&Array.from(e.changedTouches).some(t=>t.identifier===touchOrderDrag.id))finishTouchOrderDrag()},{passive:true});
 document.addEventListener('touchcancel',()=>{if(touchOrderDrag){touchOrderDrag.item.classList.remove('is-dragging');document.querySelectorAll('.phone-order-item.is-drop-target').forEach(n=>n.classList.remove('is-drop-target'));touchOrderDrag=null}},{passive:true});
-function timerTick(){const remaining=timerRemaining(),duration=Math.max(1,Number(timerState.duration_seconds)||30),pct=Math.max(0,Math.min(100,remaining/duration*100));document.querySelectorAll('[data-timer-value]').forEach(n=>n.textContent=formatClock(remaining));document.querySelectorAll('[data-timer-progress]').forEach(n=>n.style.width=pct+'%');document.querySelectorAll('.tv-timer,.player-timer').forEach(n=>{n.classList.toggle('is-warning',remaining<=10);n.classList.toggle('is-critical',remaining<=5)});if(timerState.status==='running'&&remaining<=0&&!timerExpiryRequested){timerExpiryRequested=true;supabaseClient.rpc('expire_quiz_timer').then(({error})=>{if(error)console.error(error);refreshGameSnapshot(true)}).finally(()=>{timerExpiryRequested=false})}}
+function timerTick(){const remaining=timerRemaining(),duration=Math.max(1,Number(timerState.duration_seconds)||30),pct=Math.max(0,Math.min(100,remaining/duration*100));document.querySelectorAll('[data-timer-value]').forEach(n=>n.textContent=formatClock(remaining));document.querySelectorAll('[data-timer-progress]').forEach(n=>n.style.width=pct+'%');document.querySelectorAll('.tv-timer,.player-timer').forEach(n=>{n.classList.toggle('is-warning',remaining<=10);n.classList.toggle('is-critical',remaining<=5)});if(gameControl().phase==='question'&&presentationState.stage==='answers'&&((timerState.status==='running'&&remaining<=0)||(timerState.status==='stopped'&&Number(timerState.remaining_seconds)===0))){requestQuizAutoAdvance()}}
 async function unlockTvAudio(){const player=document.getElementById('quiz-tv-audio');if(!player)return;try{player.src='assets/audio/quiz_silence.wav';player.volume=0;await player.play();player.pause();player.currentTime=0;player.volume=1;tvAudioUnlocked=true;const hint=document.getElementById('tv-audio-hint');if(hint)hint.textContent='Звук готов · управление с телефона';document.querySelector('[data-gq-audio-unlock]')?.remove();const q=currentQuestionRemote(),clip=currentAudioClip(q);if(gameControl().phase==='question'&&presentationState.stage==='audio'&&clip?.file)playTvClip(clip.file)}catch(e){notify('Не удалось активировать звук в этом браузере')}}
 function playTvClip(file){const player=document.getElementById('quiz-tv-audio');if(!player||!file)return;player.pause();player.src='assets/audio/'+file;player.currentTime=0;player.load();player.play().catch(()=>{const hint=document.getElementById('tv-audio-hint');if(hint)hint.textContent='Нажми «Разрешить звук» на экране телевизора один раз.'});lastTvClip=file}
 function handleTvAudioEvent(row){if(!IS_TV||!row)return;if(row.action==='stop'){const p=document.getElementById('quiz-tv-audio');p?.pause();if(p)p.currentTime=0;return}if(row.clip)playTvClip(row.clip)}
